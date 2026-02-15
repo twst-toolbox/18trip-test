@@ -11,13 +11,13 @@ from PIL import Image, ImageTk
 class SubtitleApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("18TRIP 字幕提取器 V10 (白/灰字兼容版)")
-        self.root.geometry("1100x800")
+        self.root.title("18TRIP 字幕提取器 V11 (突变检测版)")
+        self.root.geometry("1200x850")
         
-        # 默认区域
+        # 默认参数
         self.rect_d = [200, 500, 900, 150] 
-        # 默认亮度阈值 (130 可以同时捕获灰字和白字)
         self.binary_threshold = 130 
+        self.diff_threshold = 3.0 # 默认灵敏度 3.0%
         
         self.video_path = ""
         self.cap = None
@@ -36,36 +36,41 @@ class SubtitleApp:
         self.lbl_status.pack(side=tk.LEFT)
         tk.Button(frame_top, text="▶️ 开始提取", command=self.start_thread, bg="#ddffdd", font=("Arial", 12, "bold")).pack(side=tk.RIGHT, padx=10)
 
-        # 2. 主体区 (左右分栏)
+        # 2. 主体区
         frame_main = tk.Frame(self.root)
         frame_main.pack(fill=tk.BOTH, expand=True, padx=10)
         
-        # 左侧：预览
         self.canvas_frame = tk.Frame(frame_main, bg="black")
         self.canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.canvas = tk.Canvas(self.canvas_frame, bg="#222")
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
-        # 右侧：控制面板
-        frame_ctrl = tk.Frame(frame_main, width=300)
+        # 右侧控制区
+        frame_ctrl = tk.Frame(frame_main, width=320)
         frame_ctrl.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
         
-        # 3. 亮度阈值滑块 (V10 新增核心)
-        lf_thresh = tk.LabelFrame(frame_ctrl, text="✨ 文字亮度门槛", padx=5, pady=5)
+        # 3. 亮度阈值
+        lf_thresh = tk.LabelFrame(frame_ctrl, text="✨ 文字亮度门槛 (0-255)", padx=5, pady=5)
         lf_thresh.pack(fill=tk.X, pady=5)
-        tk.Label(lf_thresh, text="左拖: 抓灰字 / 右拖: 抗干扰", fg="gray", font=("Arial", 9)).pack()
-        
-        self.scale_thresh = tk.Scale(lf_thresh, from_=50, to=255, orient=tk.HORIZONTAL)
-        self.scale_thresh.set(self.binary_threshold) # 默认 130
+        self.scale_thresh = tk.Scale(lf_thresh, from_=50, to=255, orient=tk.HORIZONTAL, command=self.on_thresh_change)
+        self.scale_thresh.set(self.binary_threshold)
         self.scale_thresh.pack(fill=tk.X)
-        self.scale_thresh.config(command=self.on_thresh_change)
-        self.lbl_thresh_val = tk.Label(lf_thresh, text=f"当前值: {self.binary_threshold}")
+        self.lbl_thresh_val = tk.Label(lf_thresh, text=f"当前: {self.binary_threshold}")
         self.lbl_thresh_val.pack()
 
-        # 4. 绿框调整
-        lf_rect = tk.LabelFrame(frame_ctrl, text="🟢 扫描区域 (绿框)", padx=5, pady=5)
+        # 4. 突变灵敏度 (V11 新增)
+        lf_diff = tk.LabelFrame(frame_ctrl, text="⚡️ 切分灵敏度 (突变检测)", padx=5, pady=5)
+        lf_diff.pack(fill=tk.X, pady=10)
+        tk.Label(lf_diff, text="数值越小越敏感 (容易切碎)\n数值越大越迟钝 (容易连读)", fg="gray", font=("Arial", 8)).pack()
+        self.scale_diff = tk.Scale(lf_diff, from_=0.5, to=10.0, resolution=0.1, orient=tk.HORIZONTAL, command=self.on_diff_change)
+        self.scale_diff.set(self.diff_threshold)
+        self.scale_diff.pack(fill=tk.X)
+        self.lbl_diff_val = tk.Label(lf_diff, text=f"当前: {self.diff_threshold}%")
+        self.lbl_diff_val.pack()
+
+        # 5. 绿框调整
+        lf_rect = tk.LabelFrame(frame_ctrl, text="🟢 扫描区域", padx=5, pady=5)
         lf_rect.pack(fill=tk.X, pady=10)
-        
         labels = ["X (左)", "Y (上)", "W (宽)", "H (高)"]
         self.sliders = []
         for i in range(4):
@@ -76,18 +81,15 @@ class SubtitleApp:
             scale.config(command=lambda v, idx=i: self.on_rect_change(v, idx))
             self.sliders.append(scale)
 
-        # 5. 底部时间轴和进度
+        # 6. 底部
         frame_bottom = tk.Frame(self.root, pady=5)
         frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10)
-        
         self.scale_time = tk.Scale(frame_bottom, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_time_change, showvalue=0)
         self.scale_time.pack(fill=tk.X)
-        
         frame_info = tk.Frame(frame_bottom)
         frame_info.pack(fill=tk.X)
         self.lbl_time_val = tk.Label(frame_info, text="00:00")
         self.lbl_time_val.pack(side=tk.LEFT)
-        
         self.progress = ttk.Progressbar(frame_info, orient=tk.HORIZONTAL, mode='determinate')
         self.progress.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=5)
 
@@ -97,8 +99,12 @@ class SubtitleApp:
         
     def on_thresh_change(self, val):
         self.binary_threshold = int(val)
-        self.lbl_thresh_val.config(text=f"当前值: {self.binary_threshold}")
+        self.lbl_thresh_val.config(text=f"当前: {self.binary_threshold}")
         self.update_preview()
+
+    def on_diff_change(self, val):
+        self.diff_threshold = float(val)
+        self.lbl_diff_val.config(text=f"当前: {self.diff_threshold}%")
 
     def load_video(self):
         path = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mkv *.avi")])
@@ -109,7 +115,6 @@ class SubtitleApp:
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
         self.scale_time.config(to=self.total_frames)
         self.lbl_status.config(text=f"已加载: {os.path.basename(path)}")
         for s in self.sliders: s.config(to=max(w, h))
@@ -117,8 +122,7 @@ class SubtitleApp:
 
     def on_time_change(self, val):
         if not self.cap: return
-        seconds = int(int(val)/self.fps)
-        self.lbl_time_val.config(text=str(datetime.timedelta(seconds=seconds)))
+        self.lbl_time_val.config(text=str(datetime.timedelta(seconds=int(int(val)/self.fps))))
         self.update_preview()
 
     def update_preview(self):
@@ -127,26 +131,18 @@ class SubtitleApp:
         ret, frame = self.cap.read()
         if ret:
             x, y, w, h = self.rect_d
-            
-            # --- 二值化预览 ---
             roi = frame[y:y+h, x:x+w]
             if roi.size > 0:
                 gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                # 使用动态阈值
                 _, binary = cv2.threshold(gray, self.binary_threshold, 255, cv2.THRESH_BINARY)
-                
-                # 变成绿色显示提取到的字
                 bin_color = np.zeros_like(roi)
-                bin_color[:,:,1] = binary # 只给绿色通道赋值
-                
-                # 叠加回原图 (原图变暗一点，高亮显示提取内容)
+                bin_color[:,:,1] = binary
                 mask_inv = cv2.bitwise_not(binary)
                 bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
                 final_roi = cv2.add(bg, bin_color)
                 frame[y:y+h, x:x+w] = final_roi
             
             cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
             cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
@@ -171,10 +167,12 @@ class SubtitleApp:
         sub_idx = 1
         kernel = np.ones((3,3), np.uint8)
         
+        # 记录上一帧的文字形状
+        last_dilated = None
+        
         # 参数
-        thresh = self.binary_threshold
-        START_THRESHOLD = 0.005
-        END_THRESHOLD = 0.002
+        thresh_val = self.binary_threshold
+        diff_limit = self.diff_threshold / 100.0 # 转换百分比
         
         idx = 0
         while True:
@@ -188,14 +186,22 @@ class SubtitleApp:
             roi = frame[y:y+h, x:x+w]
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             
-            # 1. 提取 (使用用户设定的阈值)
-            _, binary = cv2.threshold(gray, thresh, 255, cv2.THRESH_BINARY)
+            # 1. 提取
+            _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY)
             dilated = cv2.dilate(binary, kernel, iterations=1)
             density = cv2.countNonZero(dilated) / (w * h)
             
-            # 2. 状态机
+            # 2. 计算形状突变 (Diff)
+            diff_score = 0.0
+            if last_dilated is not None:
+                diff_img = cv2.absdiff(dilated, last_dilated)
+                diff_score = cv2.countNonZero(diff_img) / (w * h)
+            
+            last_dilated = dilated.copy()
+            
+            # 3. 状态机
             if not is_speaking:
-                if density > START_THRESHOLD:
+                if density > 0.005: # 启动阈值
                     is_speaking = True
                     start_f = idx
                     peak_density = density
@@ -203,18 +209,35 @@ class SubtitleApp:
                 if density > peak_density: peak_density = density
                 
                 cut = False
-                if density < END_THRESHOLD: cut = True
-                elif density < (peak_density * 0.5) and peak_density > 0.02: cut = True
+                cut_reason = ""
+                
+                # 条件A：字没了
+                if density < 0.002: 
+                    cut = True
+                    cut_reason = "empty"
+                
+                # 条件B：字突然变少了 (峰值回落) - 对付长句变短句
+                elif density < (peak_density * 0.5) and peak_density > 0.02: 
+                    cut = True
+                    cut_reason = "drop"
+                
+                # 条件C (V11核心)：画面形状突变 - 对付短句变长句/瞬时切换
+                # 只有当当前这句话持续了一小会儿(>0.2s)才检测，防止打字过程中的误判
+                elif diff_score > diff_limit and (idx - start_f)/self.fps > 0.2:
+                    cut = True
+                    cut_reason = "diff"
                 
                 if cut:
                     dur = (idx - start_f) / self.fps
-                    if dur > 0.3:
+                    # 过滤超短噪音
+                    if dur > 0.2:
                         st = datetime.timedelta(seconds=start_f/self.fps)
                         et = datetime.timedelta(seconds=idx/self.fps)
                         subs.append(srt.Subtitle(index=sub_idx, start=st, end=et, content=f"Line {sub_idx}"))
                         sub_idx += 1
                     
-                    if density > START_THRESHOLD:
+                    # 决定是否立即开始下一句
+                    if density > 0.005:
                         is_speaking = True
                         start_f = idx
                         peak_density = density
