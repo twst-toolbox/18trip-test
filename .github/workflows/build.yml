@@ -17,16 +17,19 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 使用 Nuitka 打包机器人 (稳定、快)
+      # 【修复点 1】显式安装依赖库 (不再依赖 Nuitka 自动安装)
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      # 【修复点 2】使用新版 Nuitka 参数语法
       - name: Build with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
           script-name: 18trip.py
-          nuitka-args: >
-            --onefile
-            --windows-disable-console
-            --include-plugin-tk-files
-          requirements: requirements.txt
+          mode: onefile                       # 生成单文件
+          enable-plugins: tk-inter            # 专门开启对图形界面的支持
+          disable-console: true               # 运行时不显示黑框
 
       # 发布到 Release
       - name: Upload to Release
@@ -35,4 +38,4 @@ jobs:
           files: build/*.exe
           tag_name: v${{ github.run_number }}
           name: "18TRIP Tool v${{ github.run_number }}"
-          body: "18TRIP 字幕提取器 (V10)"
+          body: "18TRIP 字幕提取器 (V10 修正版)"
