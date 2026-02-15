@@ -5,6 +5,10 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+# 【修复点 1】给机器人发通行证，允许它上传文件
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -17,23 +21,31 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 【修复点 1】显式安装依赖库 (不再依赖 Nuitka 自动安装)
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
 
-      # 【修复点 2】使用新版 Nuitka 参数语法
+      # 开始打包 (这一步很慢，大概10分钟，正常)
       - name: Build with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
           script-name: 18trip.py
-          mode: onefile                       # 生成单文件
-          enable-plugins: tk-inter            # 专门开启对图形界面的支持
-          disable-console: true               # 运行时不显示黑框
+          mode: onefile
+          enable-plugins: tk-inter
+          disable-console: true
 
-      # 发布到 Release
+      # 【修复点 2】双重保险：先上传到临时区 (Artifacts)
+      # 这样就算 Release 失败了，你也能在页面底部下载到软件！
+      - name: Upload Artifact (Backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 18TRIP-Tool-Backup
+          path: build/*.exe
+
+      # 正式发布到 Release
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') == false # 只有不是标签触发时才运行，避免逻辑冲突
         with:
           files: build/*.exe
           tag_name: v${{ github.run_number }}
